@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from "pdf-lib";
+import { degrees, PDFDocument, rgb } from "pdf-lib";
 import * as XLSX from "xlsx";
 import type {
   CardSize,
@@ -46,6 +46,32 @@ export const guessMime = (path: string) => {
 
 export const isImagePath = (path: string) => ["png", "jpg", "jpeg"].includes(extname(path));
 export const isSpreadsheetPath = (path: string) => ["xlsx", "xls", "csv"].includes(extname(path));
+
+export const detectImageMime = (path: string, bytes: ArrayBuffer) => {
+  const header = new Uint8Array(bytes.slice(0, 16));
+  if (
+    header[0] === 0x89 &&
+    header[1] === 0x50 &&
+    header[2] === 0x4e &&
+    header[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  if (header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) return "image/jpeg";
+  if (
+    header[0] === 0x52 &&
+    header[1] === 0x49 &&
+    header[2] === 0x46 &&
+    header[3] === 0x46 &&
+    header[8] === 0x57 &&
+    header[9] === 0x45 &&
+    header[10] === 0x42 &&
+    header[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return guessMime(path);
+};
 
 export const arrayBufferToDataUrl = (bytes: ArrayBuffer, mime: string) =>
   new Promise<string>((resolve, reject) => {
@@ -109,7 +135,7 @@ export const importBrowserProject = async (fileList: FileList): Promise<ProjectD
       ? normalizePath(rawPath.slice(rootName.length + 1))
       : rawPath;
     const bytes = await file.arrayBuffer();
-    const mime = file.type || guessMime(path);
+    const mime = isImagePath(path) ? detectImageMime(path, bytes) : file.type || guessMime(path);
     entries[path] = {
       path,
       name: file.name,
@@ -145,7 +171,7 @@ export const importTauriProject = async (): Promise<ProjectData | null> => {
       } else if (isFile) {
         const bytesRaw = await fs.readFile(absolute);
         const bytes = toArrayBuffer(bytesRaw);
-        const mime = guessMime(relative);
+        const mime = isImagePath(relative) ? detectImageMime(relative, bytes) : guessMime(relative);
         entries[relative] = {
           path: relative,
           name,
@@ -255,14 +281,40 @@ export const drawImageFit = (
   ctx.drawImage(img, dx, dy, drawWidth, drawHeight);
 };
 
-export const resolveProjectImage = (project: ProjectData | null, value: string) => {
+const commonPhotoFolders = ["photo", "photos", "image", "images", "student photo", "student photos"];
+
+const pathMatches = (filePath: string, wanted: string) => {
+  const file = normalizePath(filePath).toLowerCase();
+  const target = normalizePath(wanted).toLowerCase();
+  const targetName = fileNameFromPath(target).toLowerCase();
+  const fileName = fileNameFromPath(file).toLowerCase();
+
+  return (
+    file === target ||
+    file.endsWith(`/${target}`) ||
+    fileName === target ||
+    fileName === targetName ||
+    commonPhotoFolders.some((folder) => file === `${folder}/${target}` || file.endsWith(`/${folder}/${target}`))
+  );
+};
+
+export const resolveProjectImageFile = (project: ProjectData | null, value: string) => {
   if (!project || !value) return undefined;
   const wanted = normalizePath(value.trim());
-  return (
-    project.files[wanted]?.dataUrl ||
-    project.files[decodeURIComponent(wanted)]?.dataUrl ||
-    Object.values(project.files).find((file) => normalizePath(file.path).endsWith(wanted))?.dataUrl
+  const decoded = normalizePath(decodeURIComponent(wanted));
+  const direct =
+    project.files[wanted] ||
+    project.files[decoded] ||
+    project.files[normalizePath(wanted.toLowerCase())];
+  if (direct?.dataUrl) return direct;
+
+  return Object.values(project.files).find(
+    (file) => file.dataUrl && (pathMatches(file.path, wanted) || pathMatches(file.path, decoded))
   );
+};
+
+export const resolveProjectImage = (project: ProjectData | null, value: string) => {
+  return resolveProjectImageFile(project, value)?.dataUrl;
 };
 
 export const renderCardPng = async (
@@ -440,7 +492,7 @@ export const exportPdf = async (
         y,
         width: cardPt.width,
         height: cardPt.height,
-        rotate: { type: "degrees", angle: 90 } as any
+        rotate: degrees(90)
       });
     } else {
       page.drawImage(png, { x, y, width: cardPt.width, height: cardPt.height });
@@ -499,8 +551,13 @@ export const downloadBytes = (bytes: Uint8Array, name: string, mime: string) => 
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => {
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, 2000);
 };
 
 export const saveFile = async (bytes: Uint8Array | string, name: string, mime: string) => {

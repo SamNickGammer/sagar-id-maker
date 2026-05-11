@@ -420,4 +420,11 @@ label {
   border-radius: 7px;
   font-size: 12px;
   font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.photo-check.warning {
+  background: #fff4f0;
+  color: #9d241f;
+  border-color: #e8b9ae;
 }

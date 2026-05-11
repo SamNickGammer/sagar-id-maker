@@ -39,6 +39,7 @@ import {
   normalizePath,
   renderCardPng,
   resolveProjectImage,
+  resolveProjectImageFile,
   saveFile,
   saveTextToPath,
   sizeToPx,
@@ -400,6 +401,8 @@ export default function App() {
   const paperPreset = PAPER_PRESETS[exportSettings.paperPreset] ?? PAPER_PRESETS.A4;
   const selectedPhotoUrl =
     selectedLayer?.type === "photo" ? resolveProjectImage(project, currentRow[selectedLayer.field]) : "";
+  const selectedPhotoFile =
+    selectedLayer?.type === "photo" ? resolveProjectImageFile(project, currentRow[selectedLayer.field]) : undefined;
 
   return (
     <main className="app-shell">
@@ -635,6 +638,7 @@ export default function App() {
                 onChange={(patch) => updateLayer(selectedLayer.id, patch)}
                 onDelete={deleteSelected}
                 selectedPhotoUrl={selectedPhotoUrl}
+                selectedPhotoPath={selectedPhotoFile?.path}
               />
             ) : (
               <p className="empty-state">Select a text or photo layer to edit position, font, and crop.</p>
@@ -838,13 +842,15 @@ function Inspector({
   columns,
   onChange,
   onDelete,
-  selectedPhotoUrl
+  selectedPhotoUrl,
+  selectedPhotoPath
 }: {
   layer: Layer;
   columns: string[];
   onChange: (patch: Partial<Layer>) => void;
   onDelete: () => void;
   selectedPhotoUrl?: string;
+  selectedPhotoPath?: string;
 }) {
   return (
     <div className="inspector">
@@ -898,7 +904,12 @@ function Inspector({
       {layer.type === "text" ? (
         <TextInspector layer={layer} onChange={onChange} />
       ) : (
-        <PhotoInspector layer={layer} onChange={onChange} selectedPhotoUrl={selectedPhotoUrl} />
+        <PhotoInspector
+          layer={layer}
+          onChange={onChange}
+          selectedPhotoUrl={selectedPhotoUrl}
+          selectedPhotoPath={selectedPhotoPath}
+        />
       )}
 
       <button className="danger wide" onClick={onDelete}>
@@ -980,11 +991,13 @@ function TextInspector({
 function PhotoInspector({
   layer,
   onChange,
-  selectedPhotoUrl
+  selectedPhotoUrl,
+  selectedPhotoPath
 }: {
   layer: PhotoLayer;
   onChange: (patch: Partial<Layer>) => void;
   selectedPhotoUrl?: string;
+  selectedPhotoPath?: string;
 }) {
   return (
     <>
@@ -1033,7 +1046,11 @@ function PhotoInspector({
           onChange={(event) => onChange({ radius: Number(event.target.value) })}
         />
       </label>
-      <div className="photo-check">{selectedPhotoUrl ? "Photo resolved for preview row." : "No photo found for this row."}</div>
+      <div className={`photo-check ${selectedPhotoUrl ? "" : "warning"}`}>
+        {selectedPhotoUrl
+          ? `Photo resolved: ${selectedPhotoPath}`
+          : "No photo found. Select the spreadsheet column that contains image names or paths."}
+      </div>
     </>
   );
 }
@@ -1061,7 +1078,7 @@ const collectMissingPhotos = (project: ProjectData, layers: Layer[]) => {
   for (const [index, row] of project.rows.entries()) {
     for (const layer of photoLayers) {
       const value = row[layer.field];
-      if (!value || !resolveProjectImage(project, value)) {
+      if (!value || !resolveProjectImageFile(project, value)) {
         missing.push(`row ${index} (${layer.field}: ${normalizePath(value || "empty")})`);
       }
     }
