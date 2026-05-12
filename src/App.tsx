@@ -16,7 +16,7 @@ import {
   Type,
   Upload
 } from "lucide-react";
-import { ChangeEvent, PointerEvent, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CardSize,
   ExportSettings,
@@ -109,11 +109,32 @@ export default function App() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [exportProgress, setExportProgress] = useState("");
   const [previewPng, setPreviewPng] = useState<string | null>(null);
+  const [canvasScale, setCanvasScale] = useState(1);
 
   const cardPx = useMemo(() => sizeToPx(card), [card]);
   const currentRow = project?.rows[Math.min(previewIndex, Math.max(project.rows.length - 1, 0))] ?? {};
   const selectedLayer = layers.find((layer) => layer.id === selectedId) ?? null;
   const usableColumns = project?.columns ?? [];
+
+  useEffect(() => {
+    const node = canvasRef.current;
+    if (!node) return;
+
+    const updateScale = () => {
+      const rect = node.getBoundingClientRect();
+      setCanvasScale(rect.width / cardPx.width || 1);
+    };
+
+    updateScale();
+    const observer = new ResizeObserver(updateScale);
+    observer.observe(node);
+    window.addEventListener("resize", updateScale);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateScale);
+    };
+  }, [cardPx.width]);
 
   const gridEstimate = useMemo(() => {
     const paper = PAPER_PRESETS[exportSettings.paperPreset] ?? PAPER_PRESETS.A4;
@@ -599,9 +620,15 @@ export default function App() {
                   onPointerDown={(event) => onLayerPointerDown(event, layer)}
                 >
                   {layer.type === "text" ? (
-                    <span style={textLayerStyle(layer)}>{currentRow[layer.field] || layer.field}</span>
+                    <span style={textLayerStyle(layer, canvasScale)}>
+                      {currentRow[layer.field] || layer.field}
+                    </span>
                   ) : (
-                    <PhotoPreview layer={layer} src={resolveProjectImage(project, currentRow[layer.field])} />
+                    <PhotoPreview
+                      layer={layer}
+                      src={resolveProjectImage(project, currentRow[layer.field])}
+                      scale={canvasScale}
+                    />
                   )}
                   <button
                     className="resize-handle"
@@ -820,7 +847,7 @@ export default function App() {
   );
 }
 
-function PhotoPreview({ layer, src }: { layer: PhotoLayer; src?: string }) {
+function PhotoPreview({ layer, src, scale }: { layer: PhotoLayer; src?: string; scale: number }) {
   if (!src) return <span className="photo-empty">Photo: {layer.field || "choose column"}</span>;
   return (
     <img
@@ -830,8 +857,9 @@ function PhotoPreview({ layer, src }: { layer: PhotoLayer; src?: string }) {
         width: "100%",
         height: "100%",
         objectFit: layer.fit === "stretch" ? "fill" : layer.fit,
-        transform: `scale(${layer.zoom}) translate(${layer.offsetX / 8}px, ${layer.offsetY / 8}px)`,
-        borderRadius: layer.radius
+        transform: `translate(${layer.offsetX * scale}px, ${layer.offsetY * scale}px) scale(${layer.zoom})`,
+        transformOrigin: "center",
+        borderRadius: layer.radius * scale
       }}
     />
   );
@@ -1063,9 +1091,9 @@ const layerStyle = (layer: Layer, cardPx: { width: number; height: number }) => 
   borderRadius: layer.type === "photo" ? layer.radius : 0
 });
 
-const textLayerStyle = (layer: TextLayer) => ({
+const textLayerStyle = (layer: TextLayer, scale = 1) => ({
   fontFamily: `"${layer.fontFamily}", sans-serif`,
-  fontSize: `${layer.fontSize}px`,
+  fontSize: `${layer.fontSize * scale}px`,
   color: layer.color,
   fontWeight: layer.bold ? 700 : 400,
   fontStyle: layer.italic ? "italic" : "normal",

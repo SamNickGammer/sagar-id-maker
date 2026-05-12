@@ -378,24 +378,47 @@ export const renderCardPng = async (
 const drawTextLayer = (ctx: CanvasRenderingContext2D, layer: TextLayer, value: string) => {
   ctx.save();
   ctx.beginPath();
-  ctx.rect(layer.x, layer.y, layer.width, layer.height);
+  const safePad = Math.max(2, layer.fontSize * 0.12);
+  ctx.rect(layer.x - safePad, layer.y - safePad, layer.width + safePad * 2, layer.height + safePad * 2);
   ctx.clip();
   ctx.fillStyle = layer.color;
   ctx.textAlign = layer.align;
   ctx.textBaseline = "top";
-  ctx.font = `${layer.italic ? "italic " : ""}${layer.bold ? "700 " : "400 "} ${
-    layer.fontSize
-  }px "${layer.fontFamily}", sans-serif`;
+  const fontSize = fitFontSize(ctx, value, layer);
+  ctx.font = fontString(layer, fontSize);
 
-  const x =
+  const textX =
     layer.align === "center"
       ? layer.x + layer.width / 2
       : layer.align === "right"
         ? layer.x + layer.width
         : layer.x;
-  const lines = wrapText(ctx, value, layer.width, layer.fontSize);
-  lines.forEach((line, index) => ctx.fillText(line, x, layer.y + index * layer.fontSize * 1.18));
+  const lines = wrapText(ctx, value, layer.width, fontSize);
+  const lineHeight = fontSize * 1.18;
+  lines.forEach((line, index) => ctx.fillText(line, textX, layer.y + index * lineHeight));
   ctx.restore();
+};
+
+const fontString = (layer: TextLayer, fontSize: number) =>
+  `${layer.italic ? "italic " : ""}${layer.bold ? "700 " : "400 "} ${fontSize}px "${
+    layer.fontFamily
+  }", sans-serif`;
+
+const fitFontSize = (ctx: CanvasRenderingContext2D, value: string, layer: TextLayer) => {
+  let fontSize = layer.fontSize;
+  const minFontSize = Math.max(5, Math.floor(layer.fontSize * 0.55));
+
+  while (fontSize > minFontSize) {
+    ctx.font = fontString(layer, fontSize);
+    const lines = wrapText(ctx, value, layer.width, fontSize);
+    const lineHeight = fontSize * 1.18;
+    const tooTall = lines.length * lineHeight > layer.height + fontSize * 0.2;
+    const tooWide = lines.some((line) => ctx.measureText(line).width > layer.width + 1);
+    if (!tooTall && !tooWide) break;
+    fontSize -= 1;
+  }
+
+  return fontSize;
 };
 
 const wrapText = (
